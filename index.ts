@@ -19,12 +19,16 @@
     return samples;
     }
 
-    function createFrames(pcm: Float32Array, frameSize: number, hopSize: number) : Float32Array[]{
+    function createFramesUsingHann(pcm: Float32Array, frameSize: number, hopSize: number) : Float32Array[]{
         var frame: Float32Array[] = []
         const totalSampleSize = pcm.length
         for(let i=0;i<=totalSampleSize - frameSize;i+=hopSize){
             const currentFrame = new Float32Array(frameSize);
-            for(let j=i;j<=i+frameSize;++j) currentFrame[j-i] = pcm[j]!;
+            for(let j=i;j<i+frameSize;++j){
+                currentFrame[j-i] = pcm[j]!;
+                const currentHansCoefficient = (1 - Math.cos((2 * Math.PI * (j-i))/(frameSize-1)))/2
+                currentFrame[j-i]! *= currentHansCoefficient
+            }
             frame.push(currentFrame)
         }
         return frame
@@ -33,5 +37,5 @@
     const res = loadPcm('./assets/output/test.pcm')
     console.log('Sample', res.length)
 
-    const res2 = createFrames(res, frameSize, hopSize)
+    const res2 = createFramesUsingHann(res, frameSize, hopSize)
     console.log('Sample2', res2.length)
