@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "deny": [
+      "Read(./backend/config.ts)",
+      "Edit(./backend/config.ts)",
+      "Write(./backend/config.ts)"
+    ]
+  }
+}

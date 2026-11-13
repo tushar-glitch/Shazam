@@ -1,3 +1,11 @@
 node_modules
 assets
 dist
+
+fingerprints.json
+fingerprints.db*
+songs
+songs-full
+licensed-progress.json
+licensed-retry.json
+songs-metadata.json

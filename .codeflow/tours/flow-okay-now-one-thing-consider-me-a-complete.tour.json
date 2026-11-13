@@ -1,0 +1,708 @@
+{
+  "mode": "flow",
+  "title": "Shazam 2.0 from scratch: how a song gets indexed and recognised",
+  "question": "Consider me a complete noob. Explain this whole project code-wise from scratch: where is the root starting point, and from there explain each and everything in super simple terms.",
+  "summary": "This is a small Shazam clone. The backend program decodes songs with ffmpeg and turns each one into thousands of small 'fingerprints' (hashes) using a shared engine (spectrogram, then peaks, then pairs of peaks). It stores them in SQLite. The browser records the microphone, runs the same engine, and sends its hashes to POST /match. The server picks the song whose hashes agree on a single time offset.",
+  "stops": [
+    {
+      "title": "The real starting point: npm start",
+      "file": "package.json",
+      "symbol": "npm start",
+      "depth": 0,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            12,
+            15
+          ],
+          "anchor": "\"scripts\": {",
+          "focus": "tsc && node --no-warnings dist/index.js",
+          "say": "Everything starts when you type npm start. That runs two things in a row. First, tsc compiles all the TypeScript into plain JavaScript inside a dist folder. Then Node runs dist slash index dot js, which is the compiled version of the index file at the root of the project."
+        },
+        {
+          "lines": [
+            19,
+            19
+          ],
+          "anchor": "\"type\": \"module\"",
+          "say": "This line tells Node to use modern import and export syntax. That's why the files use import statements instead of require."
+        }
+      ]
+    },
+    {
+      "title": "index.ts: imports, settings and startup",
+      "file": "index.ts",
+      "symbol": "main",
+      "depth": 1,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            1,
+            10
+          ],
+          "anchor": "import fs from 'node:fs';",
+          "say": "The file begins by importing tools that come built into Node: file access, running other programs, an HTTP server, and a built-in SQLite database. It also imports the fingerprinting engine from the engine folder. That engine is the brain of the project."
+        },
+        {
+          "lines": [
+            12,
+            15
+          ],
+          "anchor": "const minScore = 5;",
+          "say": "These are the project-wide settings. A guess needs at least five matching hashes to count. The database lives in a file called fingerprints dot db, songs go in a songs folder, and the web server uses port three thousand."
+        },
+        {
+          "lines": [
+            318,
+            318
+          ],
+          "anchor": "selfCheck();",
+          "say": "Before doing anything else, the program tests itself. It builds fake songs out of sine waves, indexes them in a throwaway in-memory database, and checks that a noisy clip still matches the right song. If the engine is broken, the program crashes here instead of giving you wrong answers later."
+        }
+      ]
+    },
+    {
+      "title": "Reading the command and opening the database",
+      "file": "index.ts",
+      "symbol": "main",
+      "depth": 1,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            320,
+            322
+          ],
+          "anchor": "const [command, file, name] = process.argv.slice(2);",
+          "focus": "openDb(dbPath)",
+          "say": "Next it reads the words you typed after npm start, such as serve or index, and opens the database file. Every command needs the database, so that comes first."
+        }
+      ]
+    },
+    {
+      "title": "openDb: the two database tables",
+      "file": "index.ts",
+      "symbol": "openDb",
+      "depth": 2,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            36,
+            43
+          ],
+          "anchor": "function openDb(file: string): Db {",
+          "say": "This opens the SQLite file and creates the tables if they don't exist yet. The songs table is simple: each song gets a number id and a unique name, such as Artist dash Title."
+        },
+        {
+          "lines": [
+            44,
+            51
+          ],
+          "anchor": "CREATE TABLE IF NOT EXISTS hashes (",
+          "say": "The hashes table is the real index. Each row says: this hash appears in this song at this moment, measured in frames. Because the hash comes first in the primary key, asking which songs contain a given hash is a fast lookup, even with millions of rows."
+        }
+      ]
+    },
+    {
+      "title": "The command switchboard",
+      "file": "index.ts",
+      "symbol": "main",
+      "depth": 1,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            324,
+            329
+          ],
+          "anchor": "if (command === 'serve') {",
+          "say": "This is a simple if-else switchboard. Serve starts the website. Fetch downloads popular song previews from iTunes and indexes them."
+        },
+        {
+          "lines": [
+            336,
+            346
+          ],
+          "anchor": "} else if (command === 'add' && file) {",
+          "say": "Add indexes a single file. Match identifies a single audio file from the command line. If you type nothing it recognises, it just prints the usage help."
+        },
+        {
+          "lines": [
+            330,
+            335
+          ],
+          "anchor": "} else if (command === 'index') {",
+          "focus": "indexFile(db, path.join(folder, entry))",
+          "say": "Let's follow the index command, because that's how songs get into the database in the first place. It loops over every file in the songs folder, skips half-finished downloads that end in dot part, and calls indexFile on each one."
+        }
+      ]
+    },
+    {
+      "title": "indexFile: one song at a time",
+      "file": "index.ts",
+      "symbol": "indexFile",
+      "depth": 2,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            104,
+            106
+          ],
+          "anchor": "function indexFile(db: Db, file: string): void {",
+          "say": "The file name, minus its extension, becomes the song's name. If a song with that name is already in the database, it's skipped, so running index again is safe."
+        },
+        {
+          "lines": [
+            109,
+            114
+          ],
+          "anchor": "const count = addSong(db, name, decodeAudio(file));",
+          "focus": "decodeAudio(file)",
+          "say": "It first decodes the audio file, then adds the result to the database. If one file is broken, the error is logged and the loop moves on, so one bad song can't stop a run over thousands."
+        }
+      ]
+    },
+    {
+      "title": "decodeAudio: turning an mp3 into raw numbers",
+      "file": "index.ts",
+      "symbol": "decodeAudio",
+      "depth": 3,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            18,
+            23
+          ],
+          "anchor": "function decodeAudio(filePath: string): Float32Array {",
+          "say": "Sound files like mp3 or m4a are compressed, so we ask the ffmpeg program to unpack them. We tell it to mix down to mono, resample to eleven thousand and twenty-five samples per second, and output raw floating point numbers. Each number is the speaker's position at one tiny moment."
+        },
+        {
+          "lines": [
+            25,
+            29
+          ],
+          "anchor": "if (result.error) throw result.error;",
+          "say": "If ffmpeg is missing or fails, we throw an error. Otherwise the raw bytes are viewed as an array of floats. That array is the PCM audio that everything else works on."
+        }
+      ]
+    },
+    {
+      "title": "addSong: fingerprint first",
+      "file": "index.ts",
+      "symbol": "addSong",
+      "depth": 3,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            58,
+            59
+          ],
+          "anchor": "function addSong(db: Db, name: string, pcm: Float32Array): number {",
+          "focus": "fingerprintAudio(pcm)",
+          "say": "Before saving anything, addSong hands the raw audio to the engine and gets back a list of fingerprints. This is the heart of the project, so let's go inside."
+        }
+      ]
+    },
+    {
+      "title": "The engine: settings and the three-step pipeline",
+      "file": "engine/index.ts",
+      "symbol": "fingerprintAudio",
+      "depth": 4,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            1,
+            6
+          ],
+          "anchor": "// Shared fingerprinting engine",
+          "say": "This engine uses no Node or browser features, so the server and the browser run exactly the same code. Audio is cut into frames of one thousand and twenty-four samples, about a tenth of a second each. A new frame starts every five hundred and twelve samples, so neighbouring frames overlap by half."
+        },
+        {
+          "lines": [
+            8,
+            11
+          ],
+          "anchor": "// Tuning knobs",
+          "say": "These are the tuning knobs. They control how picky we are about peaks, how many partners each peak is paired with, and how far ahead in time a partner can be."
+        },
+        {
+          "lines": [
+            164,
+            165
+          ],
+          "anchor": "// pcm must be mono float32 at sampleRate",
+          "focus": "spectrogram(pcm)",
+          "say": "The whole engine fits in one line with three steps. First, build a spectrogram, which shows which pitches are loud at each moment. Then find the strongest peaks in it. Then pair those peaks up into hashes. The innermost call, spectrogram, runs first."
+        }
+      ]
+    },
+    {
+      "title": "spectrogram: slicing audio into frames",
+      "file": "engine/index.ts",
+      "symbol": "spectrogram",
+      "depth": 5,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            104,
+            110
+          ],
+          "anchor": "export function spectrogram(pcm: Float32Array): Float64Array[] {",
+          "focus": "frameSpectrum(pcm, start)",
+          "say": "This walks through the audio one hop at a time and, for each frame, asks frameSpectrum how loud each frequency is. The result is a list of spectra, one per frame. Picture it as a heat map with time going across and pitch going up."
+        }
+      ]
+    },
+    {
+      "title": "frameSpectrum: one frame becomes frequencies",
+      "file": "engine/index.ts",
+      "symbol": "frameSpectrum",
+      "depth": 6,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            16,
+            20
+          ],
+          "anchor": "// Window is identical for every frame",
+          "say": "First, some prep work. The Hann window is a smooth hill shape that starts at zero, rises to one and falls back to zero. It's built once and reused for every frame."
+        },
+        {
+          "lines": [
+            86,
+            92
+          ],
+          "anchor": "export function frameSpectrum(pcm: Float32Array, start: number): Float64Array {",
+          "say": "Each frame's samples are multiplied by that hill, so the frame fades in and out instead of starting and stopping abruptly. Sharp cut-offs would create fake frequencies, and fading avoids them."
+        },
+        {
+          "lines": [
+            96,
+            100
+          ],
+          "anchor": "const magnitude = new Float64Array(frameSize / 2 + 1);",
+          "say": "Once the FFT below has run, this loop measures the strength of each frequency bin, using the length of the real and imaginary parts like the long side of a triangle. Only the lower half of the bins is kept, because for real audio the upper half is a mirror image."
+        },
+        {
+          "lines": [
+            94,
+            94
+          ],
+          "anchor": "fft(real, imaginary);",
+          "focus": "fft(real, imaginary)",
+          "say": "The Fast Fourier Transform does the actual conversion from 'sound over time' to 'how much of each pitch is present'."
+        }
+      ]
+    },
+    {
+      "title": "fft: the Fast Fourier Transform",
+      "file": "engine/index.ts",
+      "symbol": "fft",
+      "depth": 7,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            45,
+            53
+          ],
+          "anchor": "export function fft(real: Float64Array, imaginary: Float64Array): void {",
+          "say": "This is a hand-written FFT. It needs the input length to be a power of two, which one thousand and twenty-four is. It works in place, overwriting the arrays it's given."
+        },
+        {
+          "lines": [
+            22,
+            29
+          ],
+          "anchor": "function reverseBits(index: number, bitCount: number): number {",
+          "say": "The first step reorders the samples. Each position is written in binary, its bits are flipped back to front, and the sample moves there. This odd shuffle puts the samples exactly where the next step needs them."
+        },
+        {
+          "lines": [
+            57,
+            64
+          ],
+          "anchor": "for (let stageSize = 2; stageSize <= size; stageSize *= 2) {",
+          "say": "Then it builds the answer in stages. It combines pairs, then groups of four, then eight, all the way to one thousand and twenty-four. The twiddle values are points on a circle that rotate each pair by the right angle."
+        },
+        {
+          "lines": [
+            66,
+            73
+          ],
+          "anchor": "for (let i = k; i < size; i += stageSize) {",
+          "say": "For each pair of positions, the second value is rotated by the twiddle..."
+        },
+        {
+          "lines": [
+            75,
+            78
+          ],
+          "anchor": "real[i] = ar + tr;      // A + W*B",
+          "say": "...and the pair becomes their sum and their difference. This is called a butterfly. Repeating it stage after stage gives the full frequency picture in roughly n log n steps instead of n squared."
+        }
+      ]
+    },
+    {
+      "title": "findPeaks: the constellation map",
+      "file": "engine/index.ts",
+      "symbol": "findPeaks",
+      "depth": 5,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            112,
+            117
+          ],
+          "anchor": "// Constellation map: strongest bin per log-spaced band",
+          "say": "Now we have the spectrogram, and we only keep the standout points. The pitch range is split into five bands that each double in width, much like octaves. Very deep bass is skipped because phone speakers and microphones barely reproduce it."
+        },
+        {
+          "lines": [
+            119,
+            127
+          ],
+          "anchor": "export function findPeaks(spectra: Float64Array[]): Peak[] {",
+          "say": "For every frame, it finds the loudest bin inside each band, which gives up to five candidates per frame."
+        },
+        {
+          "lines": [
+            129,
+            134
+          ],
+          "anchor": "// ponytail: per-frame mean threshold",
+          "say": "A candidate is kept only if it's louder than the average of the five. The survivors are peaks, each just a frame number and a frequency bin. Plotted together they look like stars in the sky, which is why this is called a constellation map. These points tend to survive noise and bad microphones."
+        }
+      ]
+    },
+    {
+      "title": "fingerprint: pairing peaks into hashes",
+      "file": "engine/index.ts",
+      "symbol": "fingerprint",
+      "depth": 5,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            139,
+            143
+          ],
+          "anchor": "// Combinatorial hashing: pair each anchor peak",
+          "say": "One peak alone isn't very distinctive, but a pair of peaks with a time gap between them is. Each fingerprint packs three things into one number: the first frequency, the second frequency, and the gap between them."
+        },
+        {
+          "lines": [
+            146,
+            155
+          ],
+          "anchor": "for (let i = 0; i < peaks.length; i++) {",
+          "say": "Each peak acts as an anchor and looks ahead at the next few peaks, up to five partners within about three seconds. A pair is skipped if both peaks are in the same frame or on the same pitch, because a held note makes boring, common hashes."
+        },
+        {
+          "lines": [
+            157,
+            161
+          ],
+          "anchor": "prints.push({ hash: (anchor.bin << 16) | (target.bin << 6) | dt, t: anchor.frame });",
+          "say": "The bit shifts pack the two frequencies and the gap side by side into one integer. That integer is saved together with the anchor's time. The result is a list of hash and time pairs, and that's the song's fingerprint."
+        }
+      ]
+    },
+    {
+      "title": "addSong: saving the fingerprints",
+      "file": "index.ts",
+      "symbol": "addSong",
+      "depth": 3,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            61,
+            66
+          ],
+          "anchor": "db.exec('BEGIN');",
+          "say": "With the fingerprints ready, it opens a transaction, inserts the song name to get its id, and then inserts every hash with that song id and time."
+        },
+        {
+          "lines": [
+            67,
+            71
+          ],
+          "anchor": "} catch (error) {",
+          "say": "If anything fails partway, the rollback undoes it all, so you never end up with half a song in the database. It returns how many hashes were stored, and indexFile prints that count."
+        }
+      ]
+    },
+    {
+      "title": "serve: the web server",
+      "file": "index.ts",
+      "symbol": "serve",
+      "depth": 2,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            194,
+            202
+          ],
+          "anchor": "// Resolve against the project root",
+          "say": "Now the serve command. Once songs are indexed, the server hands out a few fixed files: the HTML page, the compiled browser script, the audio worklet, and the compiled engine. Only these exact paths are allowed, so nobody can request other files from your disk."
+        },
+        {
+          "lines": [
+            222,
+            224
+          ],
+          "anchor": "function serve(db: Db): void {",
+          "say": "It creates a plain Node HTTP server. Every request comes through this one callback. A POST to slash match is the recognition API, which we'll see in a moment."
+        },
+        {
+          "lines": [
+            245,
+            253
+          ],
+          "anchor": "const file = req.method === 'GET' ? staticFiles[req.url ?? ''] : undefined;",
+          "say": "Any other GET request is looked up in that list. Unknown paths get a 404. Known paths are streamed straight from disk, and a missing file returns a 500 instead of crashing the server. The server then keeps listening on port three thousand."
+        }
+      ]
+    },
+    {
+      "title": "In the browser: the Start listening button",
+      "file": "frontend/app.ts",
+      "symbol": "listen button click",
+      "depth": 0,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            1,
+            5
+          ],
+          "anchor": "import { sampleRate, fingerprintAudio } from '../engine/index.js';",
+          "say": "This is a separate flow that runs in the browser. The HTML page is just a big round button and two lines of text, and it loads this script. Notice the import: the browser uses the very same engine as the server."
+        },
+        {
+          "lines": [
+            15,
+            24
+          ],
+          "anchor": "button.addEventListener('click', () => {",
+          "focus": "listen()",
+          "say": "Clicking the button starts listening. Clicking again while it's listening just flips a flag so the loop stops. Any error is shown on the page."
+        }
+      ]
+    },
+    {
+      "title": "listen: microphone to hashes to server",
+      "file": "frontend/app.ts",
+      "symbol": "listen",
+      "depth": 1,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            46,
+            51
+          ],
+          "anchor": "// Voice-call processing (echo cancellation etc.) destroys music",
+          "say": "It asks for microphone access with echo cancellation, noise suppression and auto gain turned off, because those features are made for voice calls and damage music. The audio context runs at the same eleven thousand and twenty-five samples per second, so the browser resamples the microphone for us."
+        },
+        {
+          "lines": [
+            54,
+            59
+          ],
+          "anchor": "await context.audioWorklet.addModule('/frontend/worklet.js');",
+          "say": "An audio worklet is a tiny script that runs on the audio thread. It sends every small block of microphone samples back here, and each block is collected into the chunks list."
+        },
+        {
+          "lines": [
+            61,
+            68
+          ],
+          "anchor": "while (listening) {",
+          "focus": "fingerprintAudio(pcm)",
+          "say": "Once a second, it joins all the chunks into one recording and runs the same fingerprintAudio pipeline we just walked through: spectrogram, peaks, hashes."
+        },
+        {
+          "lines": [
+            70,
+            75
+          ],
+          "anchor": "const response = await fetch('/match', {",
+          "focus": "fetch('/match'",
+          "say": "It sends only the hash and time pairs to the server as JSON, never the raw audio. That keeps the request small and your recording private."
+        }
+      ]
+    },
+    {
+      "title": "The /match request handler",
+      "file": "index.ts",
+      "symbol": "serve request handler",
+      "depth": 2,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            224,
+            233
+          ],
+          "anchor": "if (req.method === 'POST' && req.url === '/match') {",
+          "say": "The server collects the request body piece by piece. If it grows past one megabyte, it answers 413, too large, and drops the connection. That protects the server from huge uploads."
+        },
+        {
+          "lines": [
+            234,
+            237
+          ],
+          "anchor": "req.on('end', () => {",
+          "focus": "parsePrints(body)",
+          "say": "When the whole body has arrived, it's checked by parsePrints. Bad input gets a 400 error."
+        }
+      ]
+    },
+    {
+      "title": "parsePrints: never trust the client",
+      "file": "index.ts",
+      "symbol": "parsePrints",
+      "depth": 3,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            204,
+            209
+          ],
+          "anchor": "// Trust boundary: accept only a bounded array",
+          "say": "Anything from the internet could be junk or an attack, so this function is strict. The body must be valid JSON, it must be an array, and it must hold no more than twenty thousand pairs."
+        },
+        {
+          "lines": [
+            211,
+            219
+          ],
+          "anchor": "const prints: Fingerprint[] = [];",
+          "say": "Each item must be exactly two whole numbers. The hash must fit in twenty-six bits, which is the most the engine can produce, and the time must be sensible. One bad item rejects the whole request."
+        }
+      ]
+    },
+    {
+      "title": "matchPrints: voting on the time offset",
+      "file": "index.ts",
+      "symbol": "matchPrints",
+      "depth": 3,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            74,
+            82
+          ],
+          "anchor": "// Matching: a true match has many hashes agreeing",
+          "say": "This is the clever part. A single hash can show up in many songs by chance. But if your clip really is part of a song, its hashes will all be shifted by the same amount: the point in the song where you started recording."
+        },
+        {
+          "lines": [
+            84,
+            93
+          ],
+          "anchor": "for (const { hash, t } of prints) {",
+          "say": "For every hash in the clip, it looks up every song and time where that hash appears. It then subtracts the clip time from the song time and casts a vote for that song and offset. The pile with the most votes is tracked as it goes."
+        },
+        {
+          "lines": [
+            96,
+            100
+          ],
+          "anchor": "if (bestScore < minScore) return null;",
+          "say": "If the best pile has fewer than five votes, that's treated as coincidence and the answer is no match. Otherwise it returns the song name, the score, and the offset converted to seconds. The handler sends that back as JSON."
+        }
+      ]
+    },
+    {
+      "title": "listen: showing the answer",
+      "file": "frontend/app.ts",
+      "symbol": "listen",
+      "depth": 1,
+      "kind": "context",
+      "beats": [
+        {
+          "lines": [
+            76,
+            79
+          ],
+          "anchor": "const match = await response.json() as Match | null;",
+          "say": "The browser reads the server's best guess and shows how many seconds it has heard, how many hashes it sent, and the current candidate."
+        },
+        {
+          "lines": [
+            81,
+            90
+          ],
+          "anchor": "if (match && match.score >= confidentScore) {",
+          "say": "With a score of twenty or more, it's confident. It shows the song title and where in the track you are, then stops. If fifteen seconds pass without that, it gives up with no match found. Otherwise the loop sends again a second later with more audio."
+        },
+        {
+          "lines": [
+            92,
+            97
+          ],
+          "anchor": "} finally {",
+          "say": "However the loop ends, whether by a match, giving up, the stop button or an error, this cleanup always runs. It turns off the microphone, closes the audio context, and resets the button."
+        }
+      ]
+    }
+  ],
+  "notTraced": [
+    {
+      "text": "selfCheck internals: the FFT sine-wave test, synthetic chord songs, noise rejection and parsePrints tests",
+      "file": "index.ts",
+      "line": 257
+    },
+    {
+      "text": "The fetch command: Apple top charts and iTunes search per line of queries.txt, rate-limited downloads of 30-second previews written via .part files",
+      "file": "index.ts",
+      "line": 168
+    },
+    {
+      "text": "The add and match command-line commands (same addSong and matchPrints, just for one file)",
+      "file": "index.ts",
+      "line": 336
+    },
+    {
+      "text": "The audio worklet processor that forwards 128-sample mic blocks",
+      "file": "frontend/worklet.js",
+      "line": 2
+    },
+    {
+      "text": "The page layout and styling of the single button UI",
+      "file": "frontend/index.html",
+      "line": 27
+    },
+    {
+      "text": "tsconfig compiler options (output to dist, strict checks)",
+      "file": "tsconfig.json",
+      "line": 6
+    },
+    {
+      "text": "Static file error path (500 or stream destroy when a compiled file is missing)",
+      "file": "index.ts",
+      "line": 250
+    },
+    {
+      "text": "Stop-button branch and error display in the click handler",
+      "file": "frontend/app.ts",
+      "line": 16
+    }
+  ]
+}
