@@ -4,6 +4,7 @@ import path from 'node:path';
 import type { Fingerprint } from '../engine/index.js';
 import { backendConfig } from './config.js';
 import type { FingerprintDatabase } from './fingerprint-database.js';
+import type { LyricsService } from './lyrics-service.js';
 import type { SongMatcher } from './song-matcher.js';
 
 // Resolve files against the project root (this file runs from dist/backend/), not the working directory
@@ -20,11 +21,13 @@ const contentTypes: Record<string, string> = {
 //   GET  /                  the web app
 //   GET  /api/stats         { songs: number }
 //   POST /match             body [[hash, t], ...] → Match | null
+//   GET  /api/lyrics?song=  Lyrics for a song in the library
 // The browser fingerprints the mic audio itself and sends only [hash, t] pairs.
 export class WebServer {
     constructor(
         private readonly db: FingerprintDatabase,
         private readonly matcher: SongMatcher,
+        private readonly lyrics: LyricsService,
         private readonly port: number = backendConfig.port
     ) {}
 
@@ -70,6 +73,7 @@ export class WebServer {
 
         if (req.method === 'POST' && url === '/match') return this.handleMatch(req, res);
         if (req.method === 'GET' && url === '/api/stats') return this.sendJson(res, { songs: this.db.songCount() });
+        if (req.method === 'GET' && url === '/api/lyrics') return void this.handleLyrics(req, res);
         if (req.method === 'GET') return this.serveStatic(url, res);
 
         res.writeHead(405).end();
@@ -91,6 +95,18 @@ export class WebServer {
             if (!prints) return void res.writeHead(400).end('Expected [[hash, t], ...]');
             this.sendJson(res, this.matcher.match(prints));
         });
+    }
+
+    // Only songs in the library: the server never becomes an open proxy to the lyrics service
+    private async handleLyrics(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+        const song = new URL(req.url ?? '/', 'http://localhost').searchParams.get('song') ?? '';
+        if (!song || song.length > 300 || !this.db.hasSong(song)) return void res.writeHead(404).end('Unknown song');
+        try {
+            this.sendJson(res, await this.lyrics.get(song));
+        } catch (error) {
+            console.error(`Lyrics lookup failed for "${song}": ${(error as Error).message}`);
+            res.writeHead(502).end('Lyrics service unavailable');
+        }
     }
 
     private serveStatic(url: string, res: http.ServerResponse): void {

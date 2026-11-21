@@ -91,6 +91,21 @@
             </div>
         </section>
 
+        <section id="lyrics" class="card lyrics" aria-labelledby="lyrics-title" hidden>
+            <header class="card-head">
+                <div>
+                    <h2 id="lyrics-title">Lyrics</h2>
+                    <p id="lyrics-status" class="card-sub" aria-live="polite"></p>
+                </div>
+                <button id="lyrics-stop" class="link-button" type="button">Stop following</button>
+            </header>
+            <div class="lyrics-window">
+                <div id="lyrics-lines" class="lyrics-lines"></div>
+            </div>
+            <p class="lyrics-note"><span aria-hidden="true">ⓘ</span> Lyrics are synced automatically from what the microphone hears, so they can sometimes be a little early, late or on the wrong line. They re-align by themselves as the song keeps playing.</p>
+            <p class="lyrics-credit">Lyrics from <a href="https://lrclib.net" target="_blank" rel="noopener">LRCLIB</a></p>
+        </section>
+
         <section id="notice" class="card notice" aria-labelledby="notice-title" hidden>
             <h2 id="notice-title">Couldn’t recognise that one</h2>
             <p id="notice-text"></p>

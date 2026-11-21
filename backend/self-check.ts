@@ -1,7 +1,9 @@
 import assert from 'node:assert';
 import { engineConfig, Fingerprinter, SpectrumAnalyzer } from '../engine/index.js';
 import { FingerprintDatabase } from './fingerprint-database.js';
+import { LyricsTracker } from '../frontend/lyrics-tracker.js';
 import { LicensedFetcher } from './licensed-fetcher.js';
+import { LyricsService } from './lyrics-service.js';
 import { SongIndexer } from './song-indexer.js';
 import { SongMatcher } from './song-matcher.js';
 import { WebServer } from './web-server.js';
@@ -18,6 +20,67 @@ export class SelfCheck {
         SelfCheck.checkRecognition();
         SelfCheck.checkApiValidation();
         SelfCheck.checkStaticRoutes();
+        SelfCheck.checkRepeatedParts();
+        SelfCheck.checkLyrics();
+        SelfCheck.checkLyricsTracker();
+    }
+
+    // A chorus produced as an exact copy fits a clip at two places: both are reported
+    private static checkRepeatedParts(): void {
+        SelfCheck.seed = 7;
+        const db = new FingerprintDatabase(':memory:');
+        const song = SelfCheck.synthSong(30);
+        song.copyWithin(18 * sampleRate, 4 * sampleRate, 10 * sampleRate); // 0:04-0:10 again at 0:18-0:24
+        new SongIndexer(db).addAudio('Chorus', song);
+        db.mergePending();
+
+        const clip = song.slice(5 * sampleRate, 9 * sampleRate);
+        const match = new SongMatcher(db).match(new Fingerprinter().fingerprintAudio(clip));
+        assert.strictEqual(match?.song, 'Chorus');
+        const places = [match.offsetSeconds, ...(match.alternatives ?? [])].map(Math.round).sort((a, b) => a - b);
+        assert.deepStrictEqual(places, [5, 19]);
+
+        // An unrepeated part has a single place
+        const verse = song.slice(12 * sampleRate, 16 * sampleRate);
+        assert.strictEqual(new SongMatcher(db).match(new Fingerprinter().fingerprintAudio(verse))?.alternatives, undefined);
+        db.close();
+    }
+
+    // LRC parsing, name clean-up and choosing among search results (no network involved)
+    private static checkLyrics(): void {
+        assert.deepStrictEqual(LyricsService.parseLrc('[ar:Someone]\n[00:01.50]One\n[00:10.00][01:00.25]Chorus\n[00:05]\n'), [
+            { time: 1.5, text: 'One' }, { time: 5, text: '' }, { time: 10, text: 'Chorus' }, { time: 60.25, text: 'Chorus' },
+        ]);
+        assert.deepStrictEqual(LyricsService.parseLrc('[offset:+500]\n[00:02.00]Early'), [{ time: 1.5, text: 'Early' }]);
+        assert.deepStrictEqual(LyricsService.titleVariants('Kesariya (From "Brahmastra")'), ['Kesariya (From "Brahmastra")', 'Kesariya']);
+        assert.deepStrictEqual(LyricsService.titleVariants('Song feat. Somebody'), ['Song feat. Somebody', 'Song']);
+        assert.deepStrictEqual(LyricsService.artistVariants('A.R. Rahman & Arijit Singh'), ['A.R. Rahman & Arijit Singh', 'A.R. Rahman']);
+        assert.deepStrictEqual(LyricsService.splitName('Arijit Singh - Tum Hi Ho'), { artist: 'Arijit Singh', title: 'Tum Hi Ho' });
+
+        const plain = { trackName: 'Tum Hi Ho', artistName: 'Arijit Singh', plainLyrics: 'words' };
+        const synced = { ...plain, syncedLyrics: '[00:01.00]words' };
+        const other = { trackName: 'Another Song', artistName: 'Arijit Singh', syncedLyrics: '[00:01.00]x' };
+        assert.strictEqual(LyricsService.pickBest([plain, other, synced], 'Tum Hi Ho', 'Arijit Singh'), synced);
+        assert.strictEqual(LyricsService.pickBest([other], 'Tum Hi Ho', 'Arijit Singh'), undefined);
+        assert.deepStrictEqual(LyricsService.toLyrics(synced), { status: 'synced', lines: [{ time: 1, text: 'words' }] });
+        assert.deepStrictEqual(LyricsService.toLyrics(plain), { status: 'plain', text: 'words' });
+    }
+
+    // Following the song: repeats resolve, one odd measurement is ignored, a real skip is followed
+    private static checkLyricsTracker(): void {
+        const tracker = new LyricsTracker(45, [110], 0);        // heard a chorus that is at 0:45 and 1:50
+        assert.ok(tracker.ambiguous);
+        assert.deepStrictEqual(tracker.positions(10_000), [55, 120]);
+        tracker.observe(120.4, [], 10_000);                     // 10 s later only 2:00 fits: it was the second chorus
+        assert.ok(!tracker.ambiguous);
+        assert.strictEqual(Math.round(tracker.position(15_000)), 125);
+        tracker.observe(30, [], 15_000);                        // one measurement far off: ignored
+        assert.strictEqual(Math.round(tracker.position(20_000)), 130);
+        tracker.observe(35, [], 20_000);                        // again: the song really jumped
+        assert.strictEqual(Math.round(tracker.position(25_000)), 40);
+        tracker.observe(45, [170], 30_000);                     // locked: a repeat elsewhere does not pull it away
+        assert.strictEqual(Math.round(tracker.position(30_000)), 45);
+        assert.ok(!tracker.ambiguous);
     }
 
     // A pure 1000 Hz sine must peak at the matching bin

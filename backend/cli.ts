@@ -4,6 +4,7 @@ import { AudioDecoder } from './audio-decoder.js';
 import { backendConfig } from './config.js';
 import { FingerprintDatabase } from './fingerprint-database.js';
 import { LicensedFetcher } from './licensed-fetcher.js';
+import { LyricsService } from './lyrics-service.js';
 import { SelfCheck } from './self-check.js';
 import { SongFetcher } from './song-fetcher.js';
 import { SongIndexer } from './song-indexer.js';
@@ -30,7 +31,7 @@ export class Cli {
         if (command === 'serve') {
             this.merge(db); // songs indexed by an interrupted fetch become matchable here
             console.log(`Songs in DB: ${db.songCount()}`);
-            new WebServer(db, matcher).start();
+            new WebServer(db, matcher, new LyricsService()).start();
             return; // keep the DB open while the server runs
         }
 

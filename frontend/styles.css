@@ -420,6 +420,65 @@ body[data-state='listening'] .live { display: grid; animation: rise 0.45s var(--
 .btn-ghost { background: var(--surface); border-color: var(--border-strong); color: var(--text); }
 .btn-ghost:hover { background: var(--surface-strong); }
 
+/* ---------- Synced lyrics ---------- */
+.lyrics { animation: rise 0.55s var(--ease); }
+
+.lyrics-window {
+    position: relative;
+    height: 300px;
+    overflow: hidden;
+    /* Lines fade out towards the top and bottom edges */
+    -webkit-mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
+    mask-image: linear-gradient(180deg, transparent, #000 22%, #000 78%, transparent);
+}
+
+.lyrics-lines {
+    display: grid;
+    gap: 14px;
+    padding: 4px 2px;
+    transition: transform 0.6s var(--ease);
+    will-change: transform;
+}
+
+.lyric {
+    color: var(--faint);
+    font-size: clamp(1.15rem, 3.2vw, 1.45rem);
+    font-weight: 700;
+    line-height: 1.35;
+    letter-spacing: -0.01em;
+    overflow-wrap: anywhere;
+    transform-origin: left center;
+    transition: color 0.4s var(--ease), opacity 0.4s var(--ease), transform 0.4s var(--ease), filter 0.4s var(--ease);
+}
+
+.lyric.past { opacity: 0.45; }
+.lyric.active { color: var(--text); transform: scale(1.04); text-shadow: 0 0 24px rgba(139, 123, 255, 0.45); }
+.lyric-gap { letter-spacing: 0.3em; }
+
+/* A repeated part: lines after the current one are not certain yet, so they stay soft */
+.lyrics.uncertain .lyric.active ~ .lyric,
+.lyrics.uncertain .lyric:not(.past):not(.active) { opacity: 0.35; filter: blur(2px); }
+
+.lyrics-plain { color: var(--muted); white-space: pre-line; line-height: 1.7; }
+.lyrics[data-kind="plain"] .lyrics-window { height: auto; max-height: 360px; overflow-y: auto; -webkit-mask-image: none; mask-image: none; }
+.lyrics[data-kind="not-found"] .lyrics-window,
+.lyrics[data-kind="instrumental"] .lyrics-window { height: auto; -webkit-mask-image: none; mask-image: none; }
+.lyrics-empty { color: var(--muted); padding: 12px 0; }
+
+.lyrics-note {
+    margin-top: 16px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    background: var(--surface);
+    color: var(--muted);
+    font-size: 0.8rem;
+    line-height: 1.5;
+}
+
+.lyrics-credit { margin-top: 8px; color: var(--faint); font-size: 0.75rem; }
+.lyrics-credit a { color: var(--muted); }
+
 /* ---------- No match / error ---------- */
 .notice { display: grid; gap: 12px; border-color: rgba(255, 181, 71, 0.25); animation: rise 0.5s var(--ease); }
 .notice h2 { color: var(--warm); }
@@ -588,6 +647,7 @@ body[data-audio='seen'] .spectro-empty { display: none; }
     .result .cover { width: 88px; font-size: 2rem; border-radius: 16px; }
     .card { padding: 18px; }
     .spectro-frame { height: 200px; }
+    .lyrics-window { height: 240px; }
     .spectro-foot .mono { display: none; }
     .library-pill { font-size: 0.75rem; }
 }

@@ -4,4 +4,4 @@ export { engineConfig } from './config.js';
 export { FFT } from './fft.js';
 export { SpectrumAnalyzer } from './spectrum-analyzer.js';
 export { Fingerprinter } from './fingerprinter.js';
-export type { Peak, Fingerprint, Match } from './types.js';
+export type { Peak, Fingerprint, Match, LyricLine, Lyrics } from './types.js';
