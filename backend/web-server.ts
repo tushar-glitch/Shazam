@@ -3,7 +3,7 @@ import http from 'node:http';
 import path from 'node:path';
 import type { Fingerprint } from '../engine/index.js';
 import { backendConfig } from './config.js';
-import type { FingerprintDatabase } from './fingerprint-database.js';
+import type { FingerprintIndex } from './storage/fingerprint-index.js';
 import type { SongMatcher } from './song-matcher.js';
 
 // Resolve files against the project root (this file runs from dist/backend/), not the working directory
@@ -23,7 +23,7 @@ const contentTypes: Record<string, string> = {
 // The browser fingerprints the mic audio itself and sends only [hash, t] pairs.
 export class WebServer {
     constructor(
-        private readonly db: FingerprintDatabase,
+        private readonly db: FingerprintIndex,
         private readonly matcher: SongMatcher,
         private readonly port: number = backendConfig.port
     ) {}

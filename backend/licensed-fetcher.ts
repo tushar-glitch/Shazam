@@ -18,8 +18,8 @@ type Metadata = Record<string, { id?: string; image_url?: string }>; // "Artist 
 // Each song: download → fingerprint → store id + image_url in the metadata file → delete the audio.
 // After a page is done the artist's page number goes up by one and is saved to disk, so a run
 // can be stopped at any time and the next run continues from the same page.
-// New hashes are staged (fast) and only become matchable after db.mergePending(), which the
-// CLI runs at the end of the command and before `serve`.
+// New songs go to the index's write-ahead log and become matchable at its next flush (every
+// flushIntervalMs at most), also for a `serve` running at the same time.
 export class LicensedFetcher {
     private readonly progress: Progress;
     private readonly metadata: Metadata;

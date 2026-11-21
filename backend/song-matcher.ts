@@ -1,6 +1,6 @@
 import { SpectrumAnalyzer, type Fingerprint, type Match } from '../engine/index.js';
 import { backendConfig } from './config.js';
-import type { FingerprintDatabase, OffsetVote } from './fingerprint-database.js';
+import type { FingerprintIndex, OffsetVote } from './storage/fingerprint-index.js';
 
 // A true match has many hashes agreeing on the same time offset (dbTime - clipTime).
 // Vote per (song, offset); the tallest pile wins. Like Wang 2003, only a *significant*
@@ -8,7 +8,7 @@ import type { FingerprintDatabase, OffsetVote } from './fingerprint-database.js'
 // is what chance alone produces for this clip.
 export class SongMatcher {
     constructor(
-        private readonly db: FingerprintDatabase,
+        private readonly db: FingerprintIndex,
         private readonly maxHashOccurrences: number = backendConfig.maxHashOccurrences
     ) {}
 

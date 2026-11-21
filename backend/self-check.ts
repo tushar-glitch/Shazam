@@ -1,9 +1,12 @@
 import assert from 'node:assert';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { engineConfig, Fingerprinter, SpectrumAnalyzer } from '../engine/index.js';
-import { FingerprintDatabase } from './fingerprint-database.js';
 import { LicensedFetcher } from './licensed-fetcher.js';
 import { SongIndexer } from './song-indexer.js';
 import { SongMatcher } from './song-matcher.js';
+import { FingerprintIndex } from './storage/fingerprint-index.js';
 import { WebServer } from './web-server.js';
 
 const { sampleRate, frameSize } = engineConfig;
@@ -38,7 +41,18 @@ export class SelfCheck {
 
     private static checkRecognition(): void {
         SelfCheck.seed = 1;
-        const db = new FingerprintDatabase(':memory:');
+        // A throwaway index in the OS temp folder; the real index is never opened here
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shazam-self-check-'));
+        const db = FingerprintIndex.open(dir, { flushPostings: Infinity, flushIntervalMs: Infinity, mergeFactor: 10 });
+        try {
+            SelfCheck.checkRecognitionWith(db);
+        } finally {
+            db.close();
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
+    private static checkRecognitionWith(db: FingerprintIndex): void {
         const indexer = new SongIndexer(db);
         const matcher = new SongMatcher(db);
         const fingerprinter = new Fingerprinter();
@@ -46,7 +60,7 @@ export class SelfCheck {
         const songA = SelfCheck.synthSong(20);
         indexer.addAudio('A', songA);
         indexer.addAudio('B', SelfCheck.synthSong(20));
-        db.mergePending(); // new hashes are staged until merged
+        db.flush(); // new songs are searchable once flushed
 
         // 4 s clip from 7 s into song A (not hop-aligned), with noise added
         const clip = songA.slice(7 * sampleRate + 100, 11 * sampleRate);
@@ -79,13 +93,11 @@ export class SelfCheck {
 
         // A full song replaces its preview of the same name instead of failing on UNIQUE
         indexer.addAudio('B', songA, true);
-        db.mergePending();
+        db.flush();
         assert.strictEqual(db.songCount(), 2);
         // ...and two identical recordings (A and B now) still give a confident answer
         assert.strictEqual(matcher.match(fingerprinter.fingerprintAudio(clip))?.confidence, 1);
         assert.strictEqual(matcher.match(fingerprinter.fingerprintAudio(clip))?.offsetSeconds.toFixed(0), '7');
-
-        db.close();
     }
 
     // The API boundary rejects malformed input

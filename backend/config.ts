@@ -1,5 +1,11 @@
 // Backend settings. Paths are relative to the folder you run the command from.
 export const backendConfig = {
+    // Fingerprint index: segment files + catalog.db (see docs/index-format.md)
+    indexDir: './fingerprint-index',
+    flushPostings: 4_000_000,  // write-ahead log size that triggers a new segment (~100-400 songs)
+    flushIntervalMs: 30_000,   // ...or this much time, so a running server sees new songs soon
+    mergeFactor: 10,           // segments per size tier before they are merged into one
+    // Previous single-file store. Only ever opened read-only, by `import-legacy`.
     dbPath: './fingerprints.db',
     songsDir: './songs',
     queriesFile: './queries.txt',

@@ -2,12 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { Fingerprinter, type Fingerprint } from '../engine/index.js';
 import { AudioDecoder } from './audio-decoder.js';
-import type { FingerprintDatabase } from './fingerprint-database.js';
+import type { FingerprintIndex } from './storage/fingerprint-index.js';
 
 // Fingerprints audio and stores it. The song name is the file name ("Artist - Title").
 export class SongIndexer {
     constructor(
-        private readonly db: FingerprintDatabase,
+        private readonly db: FingerprintIndex,
         private readonly fingerprinter = new Fingerprinter()
     ) {}
 
