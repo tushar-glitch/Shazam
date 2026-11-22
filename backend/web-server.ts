@@ -5,6 +5,7 @@ import type { Fingerprint } from '../engine/index.js';
 import { backendConfig } from './config.js';
 import type { FingerprintDatabase } from './fingerprint-database.js';
 import type { LyricsService } from './lyrics-service.js';
+import type { RecentMatches } from './recent-matches.js';
 import type { SongMatcher } from './song-matcher.js';
 
 // Resolve files against the project root (this file runs from dist/backend/), not the working directory
@@ -22,12 +23,16 @@ const contentTypes: Record<string, string> = {
 //   GET  /api/stats         { songs: number }
 //   POST /match             body [[hash, t], ...] → Match | null
 //   GET  /api/lyrics?song=  Lyrics for a song in the library
+//   GET  /api/songs         { songs: every song name, images: { song: cover image URL } }
+//   GET  /api/recent        { now, recent: [{ song, at }] } the last songs anyone identified
 // The browser fingerprints the mic audio itself and sends only [hash, t] pairs.
 export class WebServer {
     constructor(
         private readonly db: FingerprintDatabase,
         private readonly matcher: SongMatcher,
         private readonly lyrics: LyricsService,
+        private readonly recent: RecentMatches,
+        private readonly images: Record<string, string>,
         private readonly port: number = backendConfig.port
     ) {}
 
@@ -74,6 +79,10 @@ export class WebServer {
         if (req.method === 'POST' && url === '/match') return this.handleMatch(req, res);
         if (req.method === 'GET' && url === '/api/stats') return this.sendJson(res, { songs: this.db.songCount() });
         if (req.method === 'GET' && url === '/api/lyrics') return void this.handleLyrics(req, res);
+        if (req.method === 'GET' && url === '/api/songs') return this.sendJson(res, { songs: this.db.songNames(), images: this.images });
+        if (req.method === 'GET' && url === '/api/recent') {
+            return this.sendJson(res, { now: Date.now(), recent: this.recent.list() });
+        }
         if (req.method === 'GET') return this.serveStatic(url, res);
 
         res.writeHead(405).end();
@@ -93,7 +102,9 @@ export class WebServer {
             if (res.headersSent) return;
             const prints = WebServer.parsePrints(body);
             if (!prints) return void res.writeHead(400).end('Expected [[hash, t], ...]');
-            this.sendJson(res, this.matcher.match(prints));
+            const match = this.matcher.match(prints);
+            if (match && match.confidence >= 1) this.recent.record(match.song);
+            this.sendJson(res, match);
         });
     }
 

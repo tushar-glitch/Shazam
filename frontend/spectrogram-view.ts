@@ -5,22 +5,24 @@ const { sampleRate, frameSize, hopSize, peakFrames } = engineConfig;
 const minHz = 60;
 const maxHz = sampleRate / 2;
 const columnCssWidth = 3;      // px per frame → ~65 px per second
-const dynamicRangeDb = 65;     // quietest visible level below the loudest
-const contrast = 2.2;          // >1 pushes background noise down so the notes stand out
+const dynamicRangeDb = 50;     // quietest visible level below the loudest
+const contrast = 3.2;          // >1 pushes background noise down so the notes stand out
 const ceilingDecayDb = 0.15;   // auto-gain: how fast the "loudest" reference falls per frame
-const background: [number, number, number] = [9, 10, 20];
 const axisLabels = [100, 250, 500, 1000, 2000, 4000];
 // A peak is final once the engine has seen this many frames after it (its neighbourhood
 // + the ±0.5 s density window); newer ones may still change, so they are drawn later
 const settleFrames = peakFrames + Math.round(sampleRate / hopSize / 2);
 
 // Scrolling live spectrogram on a <canvas>: time runs right to left, pitch goes up on a
-// log scale (how we hear), colour is loudness. White dots are the engine's peaks:
-// exactly the points that became fingerprints (from the Recognizer, about a second late).
+// log scale (how we hear), ink density is loudness, like a chart printed on paper. Signal-blue
+// points are the engine's peaks: exactly the points that became fingerprints (from the
+// Recognizer, about a second late). Colours come from the page's CSS, so light and dark both work.
 export class SpectrogramView {
-    private static readonly palette = SpectrogramView.buildPalette();
-
     showPeaks = true;
+
+    private palette = new Uint8ClampedArray(256 * 3);
+    private paper = 'rgb(243, 243, 241)';
+    private signal = '#1d3bff';
 
     private readonly context: CanvasRenderingContext2D;
     private readonly analyzer = new SpectrumAnalyzer();
@@ -34,7 +36,12 @@ export class SpectrogramView {
     constructor(private readonly canvas: HTMLCanvasElement, axis: HTMLElement) {
         this.context = canvas.getContext('2d', { willReadFrequently: false })!;
         this.renderAxis(axis);
+        this.readColours();
         new ResizeObserver(() => this.resize()).observe(canvas);
+        matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+            this.readColours();
+            this.clear();
+        });
     }
 
     reset(): void {
@@ -79,7 +86,7 @@ export class SpectrogramView {
         const floorDb = this.ceilingDb - dynamicRangeDb;
 
         const image = this.context.createImageData(columnWidth, height);
-        const palette = SpectrogramView.palette;
+        const palette = this.palette;
 
         for (let y = 0; y < height; y++) {
             const [lo, hi] = this.rowBins[y]!;
@@ -109,9 +116,7 @@ export class SpectrogramView {
         const ctx = this.context;
         const columnWidth = Math.max(1, Math.round(columnCssWidth * this.pixelRatio));
         ctx.save();
-        ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
-        ctx.shadowColor = 'rgba(255, 255, 255, 0.9)';
-        ctx.shadowBlur = 6 * this.pixelRatio;
+        ctx.fillStyle = this.signal;
         for (const { frame, bin } of peaks) {
             if (frame < this.peaksDrawnTo || frame >= settled) continue;
             const x = this.canvas.width - (this.columns - frame - 0.5) * columnWidth;
@@ -152,7 +157,7 @@ export class SpectrogramView {
     }
 
     private clear(): void {
-        this.context.fillStyle = `rgb(${background.join(',')})`;
+        this.context.fillStyle = this.paper;
         this.context.fillRect(0, 0, this.canvas.width, this.canvas.height);
     }
 
@@ -165,27 +170,21 @@ export class SpectrogramView {
         }));
     }
 
-    // 256-step colour scale: background → blue → cyan → green → yellow → red ("Turbo").
-    // The quiet end fades into the background so silence looks calm, not purple.
-    private static buildPalette(): Uint8ClampedArray {
-        const palette = new Uint8ClampedArray(256 * 3);
+    // Paper → ink in 256 steps, from the page's colour tokens
+    private readColours(): void {
+        const style = getComputedStyle(document.documentElement);
+        const paper = SpectrogramView.rgb(style.getPropertyValue('--paper'), [243, 243, 241]);
+        const ink = SpectrogramView.rgb(style.getPropertyValue('--ink'), [13, 13, 13]);
+        this.signal = style.getPropertyValue('--signal').trim() || this.signal;
+        this.paper = `rgb(${paper.join(',')})`;
         for (let i = 0; i < 256; i++) {
-            const x = i / 255;
-            const turbo = SpectrogramView.turbo(0.1 + 0.9 * x);
-            const fade = Math.min(1, x / 0.3);
-            for (let c = 0; c < 3; c++) {
-                palette[i * 3 + c] = background[c]! + (turbo[c]! * 255 - background[c]!) * fade;
-            }
+            for (let c = 0; c < 3; c++) this.palette[i * 3 + c] = paper[c]! + (ink[c]! - paper[c]!) * (i / 255);
         }
-        return palette;
     }
 
-    // Google's Turbo colormap, polynomial approximation (input and output 0..1)
-    private static turbo(x: number): [number, number, number] {
-        const r = 0.13572138 + x * (4.61539260 + x * (-42.66032258 + x * (132.13108234 + x * (-152.94239396 + x * 59.28637943))));
-        const g = 0.09140261 + x * (2.19418839 + x * (4.84296658 + x * (-14.18503333 + x * (4.27729857 + x * 2.82956604))));
-        const b = 0.10667330 + x * (12.64194608 + x * (-60.58204836 + x * (110.36276771 + x * (-89.90310912 + x * 27.34824973))));
-        const clamp = (v: number) => Math.min(1, Math.max(0, v));
-        return [clamp(r), clamp(g), clamp(b)];
+    // "#rrggbb" → [r, g, b]
+    private static rgb(hex: string, fallback: [number, number, number]): [number, number, number] {
+        const m = /^#?([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex.trim());
+        return m ? [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)] : fallback;
     }
 }

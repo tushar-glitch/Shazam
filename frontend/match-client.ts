@@ -19,6 +19,18 @@ export class MatchClient {
         return response.json();
     }
 
+    async recent(): Promise<{ now: number; recent: { song: string; at: number }[] }> {
+        const response = await fetch('/api/recent');
+        if (!response.ok) throw new Error(`Server error ${response.status}`);
+        return response.json();
+    }
+
+    async library(): Promise<{ songs: string[]; images?: Record<string, string> }> {
+        const response = await fetch('/api/songs');
+        if (!response.ok) throw new Error(`Server error ${response.status}`);
+        return response.json();
+    }
+
     async librarySize(): Promise<number> {
         const response = await fetch('/api/stats');
         if (!response.ok) throw new Error(`Server error ${response.status}`);

@@ -1,22 +1,23 @@
 import { AppView } from './app-view.js';
 import { MatchClient } from './match-client.js';
 import type { Match } from '../engine/index.js';
+import { LibraryView } from './library-view.js';
 import { LyricsTracker } from './lyrics-tracker.js';
 import { LyricsView } from './lyrics-view.js';
-import { MatchHistory } from './match-history.js';
 import { Recognizer } from './recognizer.js';
 import { followerConfig, SongFollower } from './song-follower.js';
+import { setSongImages } from './song-glyph.js';
 import { SpectrogramView } from './spectrogram-view.js';
 
 // Wires the pieces together: button → Recognizer (mic + fingerprints + server)
-// → AppView (text, result, history) and SpectrogramView (live picture).
+// → AppView (text, result, recent matches) and SpectrogramView (live picture).
 class App {
     private readonly view = new AppView();
     private readonly client = new MatchClient();
     private readonly recognizer = new Recognizer(this.client);
-    private readonly history = new MatchHistory();
     private readonly spectrogram = new SpectrogramView(this.view.spectrogramCanvas, this.view.frequencyAxis);
     private readonly lyricsView = new LyricsView();
+    private readonly library = new LibraryView();
     private readonly follower = new SongFollower(this.client);
     private tracker: LyricsTracker | null = null;
     private song = '';
@@ -34,14 +35,30 @@ class App {
             this.stopFollowing();
             this.lyricsView.setStatus('Stopped following. Tap Identify another to start again.');
         });
-        this.view.clearHistoryButton.addEventListener('click', () => {
-            this.history.clear();
-            this.view.renderHistory([]);
-        });
+        document.getElementById('notice-search')!.addEventListener('click', () => this.library.focusSearch());
 
         this.view.setState('idle');
-        this.view.renderHistory(this.history.all());
         this.refreshLibrarySize();
+        this.client.library().then(
+            ({ songs, images }) => {
+                setSongImages(images ?? {});
+                this.library.setLibrary(songs);
+                this.refreshRecent(); // redraw its covers with the images
+            },
+            () => this.library.setUnavailable()
+        );
+        this.refreshRecent();
+        setInterval(() => this.refreshRecent(), 30_000);
+    }
+
+    // Songs anyone identified on this site; refreshed every 30 s and after each own match
+    private async refreshRecent(): Promise<void> {
+        try {
+            const { now, recent } = await this.client.recent();
+            this.view.renderRecent(recent, now);
+        } catch {
+            // Keep showing the last list; it refreshes again shortly
+        }
     }
 
     private async toggle(): Promise<void> {
@@ -67,7 +84,8 @@ class App {
 
             if (outcome.kind === 'matched') {
                 this.view.showMatch(outcome.match, outcome.seconds);
-                this.view.renderHistory(this.history.add(outcome.match.song));
+                this.refreshRecent();
+                this.view.revealResult();
                 this.follow(outcome.match, outcome.startedAt);
             } else if (outcome.kind === 'no-match') {
                 this.view.showNoMatch();
@@ -91,7 +109,7 @@ class App {
             onResync: (m, clipStartedAt) => this.tracker?.observe(m.offsetSeconds, m.alternatives ?? [], clipStartedAt),
             onSongChange: (m, clipStartedAt) => {
                 this.view.showMatch(m, followerConfig.windowSeconds);
-                this.view.renderHistory(this.history.add(m.song));
+                this.refreshRecent();
                 this.setSong(m, clipStartedAt);
             },
             onLost: () => {

@@ -1,10 +1,10 @@
 import type { Match } from '../engine/index.js';
-import type { HistoryEntry } from './match-history.js';
 import { recognizerConfig, type Progress } from './recognizer.js';
+import { drawCover, songRow, splitName } from './song-glyph.js';
 
 export type ViewState = 'idle' | 'starting' | 'listening' | 'matched' | 'no-match' | 'error';
 
-const ringCircumference = 2 * Math.PI * 54; // matches r="54" in index.html
+const ringCircumference = 2 * Math.PI * 56; // matches r="56" in index.html
 
 // Everything the user sees. All text goes through textContent, so song names
 // (which come from the internet) can never inject HTML.
@@ -12,7 +12,6 @@ export class AppView {
     readonly listenButton = AppView.byId<HTMLButtonElement>('listen');
     readonly againButton = AppView.byId<HTMLButtonElement>('again');
     readonly retryButton = AppView.byId<HTMLButtonElement>('retry');
-    readonly clearHistoryButton = AppView.byId<HTMLButtonElement>('clear-history');
     readonly peaksToggle = AppView.byId<HTMLInputElement>('show-peaks');
     readonly spectrogramCanvas = AppView.byId<HTMLCanvasElement>('spectrogram');
     readonly frequencyAxis = AppView.byId<HTMLElement>('freq-axis');
@@ -28,9 +27,10 @@ export class AppView {
     private readonly bestGuess = AppView.byId('best-guess');
     private readonly result = AppView.byId('result');
     private readonly notice = AppView.byId('notice');
-    private readonly historyCard = AppView.byId('history-card');
-    private readonly historyList = AppView.byId('history-list');
+    private readonly recentList = AppView.byId('recent-list');
+    private readonly recentEmpty = AppView.byId('recent-empty');
     private readonly libraryCount = AppView.byId('library-count');
+    private songs: number | null = null;
 
     setState(state: ViewState): void {
         document.body.dataset.state = state;
@@ -73,10 +73,11 @@ export class AppView {
         const { artist, title } = AppView.splitName(match.song);
 
         this.setState('matched');
-        this.setText('Song identified', 'Tap the button to find another.');
+        this.setText('Song identified', 'Still listening, to keep the lyrics in time.');
+        this.bestGuess.textContent = '';
         AppView.byId('result-title').textContent = title;
         AppView.byId('result-artist').textContent = artist || 'Unknown artist';
-        AppView.paintCover(AppView.byId('result-cover'), match.song);
+        drawCover(AppView.byId('result-cover'), match.song, 'large');
 
         AppView.byId('result-meta').replaceChildren(
             AppView.chip(`At ${AppView.formatTime(match.offsetSeconds)} in the track`),
@@ -89,10 +90,17 @@ export class AppView {
         this.againButton.focus({ preventScroll: true });
     }
 
+    // The result sits below the instrument: bring it into view if it is off screen
+    revealResult(): void {
+        const { top } = this.result.getBoundingClientRect();
+        if (top > window.innerHeight * 0.6) this.result.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+
     showNoMatch(): void {
         this.setState('no-match');
+        const library = this.songs === null ? 'the library' : `the library of ${this.songs.toLocaleString()} songs`;
         this.setText('No match this time', 'It might not be in the library yet.');
-        this.setNotice('Couldn’t recognise that one', 'A few things that usually help:', true);
+        this.setNotice('Couldn’t recognise that one', `It may not be in ${library} yet, or the sound wasn’t clear enough. A few things that usually help:`, true);
         this.retryButton.focus({ preventScroll: true });
     }
 
@@ -108,43 +116,17 @@ export class AppView {
     }
 
     setLibrarySize(songs: number | null): void {
+        this.songs = songs;
         this.libraryCount.textContent = songs === null
             ? 'Library offline'
-            : `${songs.toLocaleString()} songs in library`;
+            : `${songs.toLocaleString()} songs indexed`;
     }
 
-    renderHistory(entries: HistoryEntry[]): void {
-        this.historyCard.hidden = entries.length === 0;
-        this.historyList.replaceChildren(...entries.map(entry => {
-            const { artist, title } = AppView.splitName(entry.song);
-
-            const link = document.createElement('a');
-            link.className = 'history-item';
-            link.href = `https://www.youtube.com/results?search_query=${encodeURIComponent(entry.song)}`;
-            link.target = '_blank';
-            link.rel = 'noopener';
-
-            const cover = document.createElement('span');
-            cover.className = 'cover cover-small';
-            AppView.paintCover(cover, entry.song);
-
-            const text = document.createElement('span');
-            text.className = 'history-text';
-            const titleEl = document.createElement('strong');
-            titleEl.textContent = title;
-            const artistEl = document.createElement('span');
-            artistEl.textContent = artist || 'Unknown artist';
-            text.append(titleEl, artistEl);
-
-            const time = document.createElement('time');
-            time.dateTime = new Date(entry.at).toISOString();
-            time.textContent = AppView.timeAgo(entry.at);
-
-            link.append(cover, text, time);
-            const item = document.createElement('li');
-            item.append(link);
-            return item;
-        }));
+    // Songs anyone identified on this site, newest first. `now` is the server's clock, so
+    // "2 min ago" is right even if this device's clock is off.
+    renderRecent(entries: { song: string; at: number }[], now: number): void {
+        this.recentEmpty.hidden = entries.length > 0;
+        this.recentList.replaceChildren(...entries.map(entry => songRow(entry.song, AppView.timeAgo(entry.at, now))));
     }
 
     private setText(status: string, detail: string): void {
@@ -158,24 +140,8 @@ export class AppView {
         AppView.byId('notice-tips').hidden = !showTips;
     }
 
-    // Song names are stored as "Artist - Title"
     static splitName(name: string): { artist: string; title: string } {
-        const split = name.indexOf(' - ');
-        return split > 0
-            ? { artist: name.slice(0, split), title: name.slice(split + 3) }
-            : { artist: '', title: name };
-    }
-
-    // No artwork in the library, so each song gets its own stable gradient + initials
-    private static paintCover(element: HTMLElement, song: string): void {
-        let hash = 0;
-        for (const char of song) hash = (hash * 31 + char.codePointAt(0)!) >>> 0;
-        const hue = hash % 360;
-        const hue2 = (hue + 40 + (hash >> 9) % 80) % 360;
-        element.style.background = `linear-gradient(135deg, hsl(${hue} 80% 62%), hsl(${hue2} 75% 38%))`;
-
-        const words = AppView.splitName(song).title.replace(/\(.*?\)|\[.*?\]/g, '').trim().split(/\s+/);
-        element.textContent = words.slice(0, 2).map(w => Array.from(w)[0] ?? '').join('').toUpperCase();
+        return splitName(name);
     }
 
     private static chip(text: string): HTMLLIElement {
@@ -189,12 +155,12 @@ export class AppView {
         return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
     }
 
-    private static timeAgo(at: number): string {
-        const minutes = Math.round((Date.now() - at) / 60000);
-        const format = new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' });
-        if (minutes < 60) return format.format(-minutes, 'minute');
-        if (minutes < 60 * 24) return format.format(-Math.round(minutes / 60), 'hour');
-        return format.format(-Math.round(minutes / (60 * 24)), 'day');
+    private static timeAgo(at: number, now: number): string {
+        const minutes = Math.max(0, Math.round((now - at) / 60000));
+        if (minutes < 1) return 'just now';
+        if (minutes < 60) return `${minutes} min ago`;
+        if (minutes < 60 * 24) return `${Math.round(minutes / 60)} h ago`;
+        return `${Math.round(minutes / (60 * 24))} d ago`;
     }
 
     private static byId<T extends HTMLElement = HTMLElement>(id: string): T {

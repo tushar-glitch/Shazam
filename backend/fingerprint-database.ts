@@ -122,6 +122,11 @@ export class FingerprintDatabase {
         return (this.db.prepare('SELECT COUNT(*) AS n FROM songs').get() as { n: number }).n;
     }
 
+    // Every song name, alphabetical (for the library list in the web app)
+    songNames(): string[] {
+        return (this.db.prepare('SELECT name FROM songs ORDER BY name COLLATE NOCASE').all() as { name: string }[]).map(r => r.name);
+    }
+
     close(): void {
         this.db.close();
     }

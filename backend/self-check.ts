@@ -2,8 +2,10 @@ import assert from 'node:assert';
 import { engineConfig, Fingerprinter, SpectrumAnalyzer } from '../engine/index.js';
 import { FingerprintDatabase } from './fingerprint-database.js';
 import { LyricsTracker } from '../frontend/lyrics-tracker.js';
+import { SongSearch } from '../frontend/song-search.js';
 import { LicensedFetcher } from './licensed-fetcher.js';
 import { LyricsService } from './lyrics-service.js';
+import { RecentMatches } from './recent-matches.js';
 import { SongIndexer } from './song-indexer.js';
 import { SongMatcher } from './song-matcher.js';
 import { WebServer } from './web-server.js';
@@ -23,6 +25,40 @@ export class SelfCheck {
         SelfCheck.checkRepeatedParts();
         SelfCheck.checkLyrics();
         SelfCheck.checkLyricsTracker();
+        SelfCheck.checkSongSearch();
+        SelfCheck.checkRecentMatches();
+    }
+
+    // Recently identified: newest first, at most `limit`, a re-sync within 10 min is not a new entry
+    private static checkRecentMatches(): void {
+        const recent = new RecentMatches('', 3);
+        const minute = 60_000;
+        recent.record('A', 0);
+        recent.record('A', 2 * minute);           // the lyrics re-sync of the same listener
+        recent.record('B', 3 * minute);
+        assert.deepStrictEqual(recent.list().map(e => e.song), ['B', 'A']);
+        recent.record('A', 20 * minute);          // heard again much later: moves to the top
+        recent.record('C', 21 * minute);
+        recent.record('D', 22 * minute);
+        assert.deepStrictEqual(recent.list().map(e => e.song), ['D', 'C', 'A']);
+    }
+
+    // Library search: partial words, typos, accents, any word order; originals before remixes
+    private static checkSongSearch(): void {
+        const search = new SongSearch([
+            'Pritam - Kesariya Lofi Mix', 'Pritam - Kesariya', 'Arijit Singh - Zaalima', 'Mithoon - Tum Hi Ho (From Aashiqui 2)',
+            'Stromae - Alors On Danse', 'Beyoncé - Halo', 'Arijit Singh - Ve Maahi',
+        ]);
+        assert.deepStrictEqual(search.search('kesariya'), ['Pritam - Kesariya', 'Pritam - Kesariya Lofi Mix']);
+        assert.deepStrictEqual(search.search('kesaria').slice(0, 1), ['Pritam - Kesariya']);   // one typo
+        assert.deepStrictEqual(search.search('kesar').length, 2);                                // partial word
+        assert.deepStrictEqual(search.search('arijit'), ['Arijit Singh - Zaalima', 'Arijit Singh - Ve Maahi']); // ties: shorter name first
+        assert.deepStrictEqual(search.search('zaalima arijit'), ['Arijit Singh - Zaalima']);    // any order
+        assert.deepStrictEqual(search.search('beyonce'), ['Beyoncé - Halo']);                    // accents
+        assert.deepStrictEqual(search.search('tum hi ho aashiqui'), ['Mithoon - Tum Hi Ho (From Aashiqui 2)']);
+        assert.deepStrictEqual(search.search('zaalima pritam'), []);                             // every word must match
+        assert.deepStrictEqual(search.search('   '), []);
+        assert.ok(SongSearch.withinOneEdit('kesaria', 'kesariya') && !SongSearch.withinOneEdit('kesar', 'kesariya'));
     }
 
     // A chorus produced as an exact copy fits a clip at two places: both are reported

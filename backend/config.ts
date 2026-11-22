@@ -19,6 +19,10 @@ export const backendConfig = {
     alternativeRatio: 0.6,     // another position in the same song this strong = ambiguous (repeated chorus)
     maxAlternatives: 3,
 
+    // "Recently identified": the last songs anyone matched on this server
+    recentMatchesFile: './recent-matches.json',
+    recentMatchesShown: 5,
+
     // Synced lyrics (LRCLIB: free, no key). Results, including "not found", are cached on disk.
     lyricsApiUrl: 'https://lrclib.net',
     lyricsCacheFile: './lyrics-cache.json',
