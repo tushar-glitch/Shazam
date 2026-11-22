@@ -10,3 +10,5 @@ licensed-progress.json
 licensed-retry.json
 songs-metadata.json
 fingerprint-index
+lyrics-cache.json
+recent-matches.json

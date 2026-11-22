@@ -23,12 +23,34 @@ export class SongMatcher {
         const { minScore } = backendConfig;
         const chance = others.find(v => v.score < best.score / 2 || v.score < 2 * minScore);
 
+        const alternatives = SongMatcher.alternatives(votes, best).map(SpectrumAnalyzer.frameToSeconds);
         return {
             song: this.db.songName(best.songId),
             score: best.score,
             offsetSeconds: SpectrumAnalyzer.frameToSeconds(best.offset),
             confidence: SongMatcher.confidence(best.score, chance?.score ?? 0),
+            ...(alternatives.length > 0 && { alternatives }),
         };
+    }
+
+    // A repeated part of a song (a chorus produced as a copy) fits the clip at several offsets.
+    // Returns those other offsets of the best song, in frames: piles at least
+    // alternativeRatio as strong as the best one and more than 2 s away from it (and each other).
+    static alternatives(votes: OffsetVote[], best: OffsetVote): number[] {
+        const { alternativeRatio, maxAlternatives } = backendConfig;
+        const minGap = Math.round(2 / SpectrumAnalyzer.frameToSeconds(1));
+        const own = votes.filter(v => v.songId === best.songId);
+        const scores = new Map(own.map(v => [v.offset, v.score]));
+
+        const found: number[] = [];
+        const piles = own
+            .map(v => ({ offset: v.offset, score: v.score + (scores.get(v.offset + 1) ?? 0) }))
+            .sort((a, b) => b.score - a.score || a.offset - b.offset);
+        for (const pile of piles) {
+            if (found.length >= maxAlternatives || pile.score < best.score * alternativeRatio) break;
+            if ([best.offset, ...found].every(o => Math.abs(o - pile.offset) > minGap)) found.push(pile.offset);
+        }
+        return found;
     }
 
     // 0..1; 1 = significant enough to show as the answer

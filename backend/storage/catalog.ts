@@ -86,6 +86,11 @@ export class Catalog {
         return (this.sql('SELECT name FROM songs WHERE id = ?').get(id) as { name: string } | undefined)?.name;
     }
 
+    // Every song name, alphabetical
+    songNames(): string[] {
+        return (this.sql('SELECT name FROM songs ORDER BY name COLLATE NOCASE').all() as { name: string }[]).map(r => r.name);
+    }
+
     songCount(): number {
         return (this.sql('SELECT COUNT(*) AS n FROM songs').get() as { n: number }).n;
     }

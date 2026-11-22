@@ -3,7 +3,11 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { engineConfig, Fingerprinter, SpectrumAnalyzer } from '../engine/index.js';
+import { LyricsTracker } from '../frontend/lyrics-tracker.js';
+import { SongSearch } from '../frontend/song-search.js';
 import { LicensedFetcher } from './licensed-fetcher.js';
+import { LyricsService } from './lyrics-service.js';
+import { RecentMatches } from './recent-matches.js';
 import { SongIndexer } from './song-indexer.js';
 import { SongMatcher } from './song-matcher.js';
 import { FingerprintIndex } from './storage/fingerprint-index.js';
@@ -21,6 +25,113 @@ export class SelfCheck {
         SelfCheck.checkRecognition();
         SelfCheck.checkApiValidation();
         SelfCheck.checkStaticRoutes();
+        SelfCheck.checkRepeatedParts();
+        SelfCheck.checkLyrics();
+        SelfCheck.checkLyricsTracker();
+        SelfCheck.checkSongSearch();
+        SelfCheck.checkRecentMatches();
+    }
+
+    // Recently identified: newest first, at most `limit`, a re-sync within 10 min is not a new entry
+    private static checkRecentMatches(): void {
+        const recent = new RecentMatches('', 3);
+        const minute = 60_000;
+        recent.record('A', 0);
+        recent.record('A', 2 * minute);           // the lyrics re-sync of the same listener
+        recent.record('B', 3 * minute);
+        assert.deepStrictEqual(recent.list().map(e => e.song), ['B', 'A']);
+        recent.record('A', 20 * minute);          // heard again much later: moves to the top
+        recent.record('C', 21 * minute);
+        recent.record('D', 22 * minute);
+        assert.deepStrictEqual(recent.list().map(e => e.song), ['D', 'C', 'A']);
+    }
+
+    // Library search: partial words, typos, accents, any word order; originals before remixes
+    private static checkSongSearch(): void {
+        const search = new SongSearch([
+            'Pritam - Kesariya Lofi Mix', 'Pritam - Kesariya', 'Arijit Singh - Zaalima', 'Mithoon - Tum Hi Ho (From Aashiqui 2)',
+            'Stromae - Alors On Danse', 'Beyoncé - Halo', 'Arijit Singh - Ve Maahi',
+        ]);
+        assert.deepStrictEqual(search.search('kesariya'), ['Pritam - Kesariya', 'Pritam - Kesariya Lofi Mix']);
+        assert.deepStrictEqual(search.search('kesaria').slice(0, 1), ['Pritam - Kesariya']);   // one typo
+        assert.deepStrictEqual(search.search('kesar').length, 2);                                // partial word
+        assert.deepStrictEqual(search.search('arijit'), ['Arijit Singh - Zaalima', 'Arijit Singh - Ve Maahi']); // ties: shorter name first
+        assert.deepStrictEqual(search.search('zaalima arijit'), ['Arijit Singh - Zaalima']);    // any order
+        assert.deepStrictEqual(search.search('beyonce'), ['Beyoncé - Halo']);                    // accents
+        assert.deepStrictEqual(search.search('tum hi ho aashiqui'), ['Mithoon - Tum Hi Ho (From Aashiqui 2)']);
+        assert.deepStrictEqual(search.search('zaalima pritam'), []);                             // every word must match
+        assert.deepStrictEqual(search.search('   '), []);
+        assert.ok(SongSearch.withinOneEdit('kesaria', 'kesariya') && !SongSearch.withinOneEdit('kesar', 'kesariya'));
+    }
+
+    // A chorus produced as an exact copy fits a clip at two places: both are reported
+    private static checkRepeatedParts(): void {
+        SelfCheck.seed = 7;
+        SelfCheck.withTempIndex(db => {
+            const song = SelfCheck.synthSong(30);
+            song.copyWithin(18 * sampleRate, 4 * sampleRate, 10 * sampleRate); // 0:04-0:10 again at 0:18-0:24
+            new SongIndexer(db).addAudio('Chorus', song);
+            db.flush(); // new songs are searchable once flushed
+
+            const clip = song.slice(5 * sampleRate, 9 * sampleRate);
+            const match = new SongMatcher(db).match(new Fingerprinter().fingerprintAudio(clip));
+            assert.strictEqual(match?.song, 'Chorus');
+            const places = [match.offsetSeconds, ...(match.alternatives ?? [])].map(Math.round).sort((a, b) => a - b);
+            assert.deepStrictEqual(places, [5, 19]);
+
+            // An unrepeated part has a single place
+            const verse = song.slice(12 * sampleRate, 16 * sampleRate);
+            assert.strictEqual(new SongMatcher(db).match(new Fingerprinter().fingerprintAudio(verse))?.alternatives, undefined);
+        });
+    }
+
+    // A throwaway index in the OS temp folder; the real index is never opened here
+    private static withTempIndex(check: (db: FingerprintIndex) => void): void {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shazam-self-check-'));
+        const db = FingerprintIndex.open(dir, { flushPostings: Infinity, flushIntervalMs: Infinity, mergeFactor: 10 });
+        try {
+            check(db);
+        } finally {
+            db.close();
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
+    }
+
+    // LRC parsing, name clean-up and choosing among search results (no network involved)
+    private static checkLyrics(): void {
+        assert.deepStrictEqual(LyricsService.parseLrc('[ar:Someone]\n[00:01.50]One\n[00:10.00][01:00.25]Chorus\n[00:05]\n'), [
+            { time: 1.5, text: 'One' }, { time: 5, text: '' }, { time: 10, text: 'Chorus' }, { time: 60.25, text: 'Chorus' },
+        ]);
+        assert.deepStrictEqual(LyricsService.parseLrc('[offset:+500]\n[00:02.00]Early'), [{ time: 1.5, text: 'Early' }]);
+        assert.deepStrictEqual(LyricsService.titleVariants('Kesariya (From "Brahmastra")'), ['Kesariya (From "Brahmastra")', 'Kesariya']);
+        assert.deepStrictEqual(LyricsService.titleVariants('Song feat. Somebody'), ['Song feat. Somebody', 'Song']);
+        assert.deepStrictEqual(LyricsService.artistVariants('A.R. Rahman & Arijit Singh'), ['A.R. Rahman & Arijit Singh', 'A.R. Rahman']);
+        assert.deepStrictEqual(LyricsService.splitName('Arijit Singh - Tum Hi Ho'), { artist: 'Arijit Singh', title: 'Tum Hi Ho' });
+
+        const plain = { trackName: 'Tum Hi Ho', artistName: 'Arijit Singh', plainLyrics: 'words' };
+        const synced = { ...plain, syncedLyrics: '[00:01.00]words' };
+        const other = { trackName: 'Another Song', artistName: 'Arijit Singh', syncedLyrics: '[00:01.00]x' };
+        assert.strictEqual(LyricsService.pickBest([plain, other, synced], 'Tum Hi Ho', 'Arijit Singh'), synced);
+        assert.strictEqual(LyricsService.pickBest([other], 'Tum Hi Ho', 'Arijit Singh'), undefined);
+        assert.deepStrictEqual(LyricsService.toLyrics(synced), { status: 'synced', lines: [{ time: 1, text: 'words' }] });
+        assert.deepStrictEqual(LyricsService.toLyrics(plain), { status: 'plain', text: 'words' });
+    }
+
+    // Following the song: repeats resolve, one odd measurement is ignored, a real skip is followed
+    private static checkLyricsTracker(): void {
+        const tracker = new LyricsTracker(45, [110], 0);        // heard a chorus that is at 0:45 and 1:50
+        assert.ok(tracker.ambiguous);
+        assert.deepStrictEqual(tracker.positions(10_000), [55, 120]);
+        tracker.observe(120.4, [], 10_000);                     // 10 s later only 2:00 fits: it was the second chorus
+        assert.ok(!tracker.ambiguous);
+        assert.strictEqual(Math.round(tracker.position(15_000)), 125);
+        tracker.observe(30, [], 15_000);                        // one measurement far off: ignored
+        assert.strictEqual(Math.round(tracker.position(20_000)), 130);
+        tracker.observe(35, [], 20_000);                        // again: the song really jumped
+        assert.strictEqual(Math.round(tracker.position(25_000)), 40);
+        tracker.observe(45, [170], 30_000);                     // locked: a repeat elsewhere does not pull it away
+        assert.strictEqual(Math.round(tracker.position(30_000)), 45);
+        assert.ok(!tracker.ambiguous);
     }
 
     // A pure 1000 Hz sine must peak at the matching bin
@@ -41,15 +152,7 @@ export class SelfCheck {
 
     private static checkRecognition(): void {
         SelfCheck.seed = 1;
-        // A throwaway index in the OS temp folder; the real index is never opened here
-        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shazam-self-check-'));
-        const db = FingerprintIndex.open(dir, { flushPostings: Infinity, flushIntervalMs: Infinity, mergeFactor: 10 });
-        try {
-            SelfCheck.checkRecognitionWith(db);
-        } finally {
-            db.close();
-            fs.rmSync(dir, { recursive: true, force: true });
-        }
+        SelfCheck.withTempIndex(db => SelfCheck.checkRecognitionWith(db));
     }
 
     private static checkRecognitionWith(db: FingerprintIndex): void {

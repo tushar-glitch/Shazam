@@ -22,6 +22,17 @@ export const backendConfig = {
     chanceFloor: 3,            // runner-up below this counts as this (tiny piles are pure chance)
     maxHashOccurrences: 1000,  // skip hashes found more often than this ("stop words"); higher = slower, more votes
     voteCandidates: 200,       // top (song, offset) piles fetched before merging neighbours
+    alternativeRatio: 0.6,     // another position in the same song this strong = ambiguous (repeated chorus)
+    maxAlternatives: 3,
+
+    // "Recently identified": the last songs anyone matched on this server
+    recentMatchesFile: './recent-matches.json',
+    recentMatchesShown: 5,
+
+    // Synced lyrics (LRCLIB: free, no key). Results, including "not found", are cached on disk.
+    lyricsApiUrl: 'https://lrclib.net',
+    lyricsCacheFile: './lyrics-cache.json',
+    lyricsNotFoundRetryDays: 7, // look a song up again after this long if it had no lyrics
     itunesDelayMs: 3000,       // iTunes API allows ~20 requests/minute
     maxBodyBytes: 1 << 20,     // largest POST /match body accepted
     maxPairs: 20000,           // ~60 s of audio, far more than a listen session sends

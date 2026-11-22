@@ -11,7 +11,7 @@ export const recognizerConfig = {
 export type Progress = { seconds: number; hashes: number; best: Match | null; peaks: Peak[]; frames: number };
 
 export type Outcome =
-    | { kind: 'matched'; match: Match; seconds: number }
+    | { kind: 'matched'; match: Match; seconds: number; startedAt: number } // startedAt: performance.now() ms of the first sample
     | { kind: 'no-match' }
     | { kind: 'stopped' };
 
@@ -44,10 +44,12 @@ export class Recognizer {
         this.listening = true;
         const microphone = new Microphone();
         const chunks: Float32Array[] = [];
+        let lastChunkAt = 0;
 
         try {
             await microphone.start(samples => {
                 chunks.push(samples);
+                lastChunkAt = performance.now();
                 events.onSamples(samples);
             });
             if (this.listening) events.onStarted();
@@ -58,6 +60,7 @@ export class Recognizer {
 
                 // ponytail: re-fingerprints the whole recording each tick (~15 s max, a few ms); go incremental if sessions get long
                 const pcm = Recognizer.concat(chunks);
+                const startedAt = lastChunkAt - (pcm.length / engineConfig.sampleRate) * 1000;
                 const spectra = this.analyzer.spectrogram(pcm);
                 const peaks = this.fingerprinter.findPeaks(spectra);
                 const prints = this.fingerprinter.fingerprint(peaks);
@@ -67,7 +70,7 @@ export class Recognizer {
                 events.onProgress({ seconds, hashes: prints.length, best, peaks, frames: spectra.length });
 
                 if (best && best.confidence >= 1) {
-                    return { kind: 'matched', match: best, seconds };
+                    return { kind: 'matched', match: best, seconds, startedAt };
                 }
                 if (seconds >= recognizerConfig.maxSeconds) return { kind: 'no-match' };
             }

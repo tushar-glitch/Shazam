@@ -163,6 +163,11 @@ export class FingerprintIndex {
         return this.catalog.songCount();
     }
 
+    // Every song name, alphabetical (for the library list in the web app)
+    songNames(): string[] {
+        return this.catalog.songNames();
+    }
+
     stats(): IndexStats {
         return { songs: this.catalog.songCount(), pendingPostings: this.catalog.pendingCount(), segments: this.catalog.segments() };
     }

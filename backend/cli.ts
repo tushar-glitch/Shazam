@@ -4,6 +4,9 @@ import { Fingerprinter } from '../engine/index.js';
 import { AudioDecoder } from './audio-decoder.js';
 import { backendConfig } from './config.js';
 import { LicensedFetcher } from './licensed-fetcher.js';
+import { LyricsService } from './lyrics-service.js';
+import { RecentMatches } from './recent-matches.js';
+import { loadSongImages } from './song-images.js';
 import { SelfCheck } from './self-check.js';
 import { SongFetcher } from './song-fetcher.js';
 import { SongIndexer } from './song-indexer.js';
@@ -57,7 +60,7 @@ export class Cli {
 
         if (command === 'serve') {
             console.log(`Songs in index: ${index.songCount()}`);
-            new WebServer(index, new SongMatcher(index)).start();
+            new WebServer(index, new SongMatcher(index), new LyricsService(), new RecentMatches(), loadSongImages(backendConfig.licensedMetadataFile)).start();
             return; // keep the index open while the server runs
         }
 
